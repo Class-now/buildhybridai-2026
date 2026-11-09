@@ -1,0 +1,10 @@
+{
+  "name": "Veil — private document helper",
+  "short_name": "Veil",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f4ef",
+  "theme_color": "#14161c",
+  "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
