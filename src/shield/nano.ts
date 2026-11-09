@@ -30,6 +30,7 @@ const NOT_IDENTIFYING = new RegExp(
   [
     String.raw`^(within\s+|in\s+|after\s+)?\d+\s*(more\s+)?(minutes?|hours?|days?|weeks?|months?|years?)$`, // "7 days", "in 2 weeks"
     String.raw`^\d{1,2}[/.-]\d{1,2}([/.-]\d{2,4})?$`, // "10/28", "10/28/2026"
+    String.raw`^\d+(\.\d+)?\s*(lbs?|pounds?|kg|g|mg|mcg|ml|l|%|percent)$`, // "2 lb", "40 mg"
     String.raw`^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(,?\s+\d{4})?$`, // "Oct 28, 2026"
   ].join('|'),
   'i',
