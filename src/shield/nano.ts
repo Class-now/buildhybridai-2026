@@ -26,6 +26,15 @@ Do not include generic dates, deadlines, money amounts, medical or legal terms, 
 
 const CHUNK = 2500;
 
+const NOT_IDENTIFYING = new RegExp(
+  [
+    String.raw`^(within\s+|in\s+|after\s+)?\d+\s*(more\s+)?(minutes?|hours?|days?|weeks?|months?|years?)$`, // "7 days", "in 2 weeks"
+    String.raw`^\d{1,2}[/.-]\d{1,2}([/.-]\d{2,4})?$`, // "10/28", "10/28/2026"
+    String.raw`^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(,?\s+\d{4})?$`, // "Oct 28, 2026"
+  ].join('|'),
+  'i',
+);
+
 function chunks(text: string): string[] {
   if (text.length <= CHUNK) return [text];
   const out: string[] = [];
@@ -61,6 +70,9 @@ export async function detectWithNano(text: string): Promise<Span[]> {
       const value = (e.text ?? '').trim();
       const type = (TYPES as string[]).includes(e.type ?? '') ? (e.type as EntityType) : 'OTHER';
       if (value.length < 2 || value.length > 120) continue;
+      // Nano sometimes returns deadlines and plain dates despite the instruction; they carry
+      // no identity and hiding them from the cloud makes answers worse. Birth dates come from rules.
+      if (type !== 'DOB' && NOT_IDENTIFYING.test(value)) continue;
       // Only trust values that literally appear in the text (no hallucinated PII).
       const idx = text.indexOf(value);
       if (idx < 0) continue;
