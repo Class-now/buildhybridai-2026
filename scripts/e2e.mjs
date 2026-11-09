@@ -54,7 +54,8 @@ async function newPage(stubNano) {
   const page = await ctx.newPage();
   const cloudBodies = [];
   page.on('request', (r) => {
-    if (r.url().includes('googleapis.com') && r.method() === 'POST') cloudBodies.push(r.postData() ?? '');
+    // Only model calls count; the App Check token exchange carries no document text.
+    if (r.url().includes('googleapis.com') && !r.url().includes('firebaseappcheck') && r.method() === 'POST') cloudBodies.push(r.postData() ?? '');
   });
   page.on('pageerror', (e) => console.log('pageerror:', e.message));
   await page.goto(url, { waitUntil: 'networkidle' });
