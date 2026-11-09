@@ -242,7 +242,7 @@ function renderReview() {
     <div><b>${sh.entities.length}</b><span>identifiers found</span></div>
     <div><b>${masked.length}</b><span>will be masked</span></div>
     <div class="${open.length ? 'warn' : ''}"><b>${open.length}</b><span>released by you</span></div>
-    <div><b>${sh.nanoUsed ? 'Nano + rules' : 'Rules'}</b><span>detector · ${fmtMs(sh.ms)} · on device</span></div>`;
+    <div><b>${sh.nanoUsed ? 'Nano + rules' : 'Rules'}</b><span>${state.shielding ? '<span class="spinner"></span> Gemini Nano still reading…' : `detector · ${fmtMs(sh.ms)} · on device`}</span></div>`;
   card.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === state.view)));
   $('#doc-view').innerHTML =
     state.view === 'original' ? highlightOriginal(sh.original, sh.spans, sh.entities) : highlightPlaceholders(out);
@@ -328,7 +328,7 @@ function renderAsk() {
   $('#route').className = `route ${r.expected}`;
   const running = !!state.answer?.running;
   const btn = $<HTMLButtonElement>('#btn-run');
-  btn.disabled = running || r.expected === 'blocked' || (state.task.id === 'ask' && !state.question.trim());
+  btn.disabled = running || state.shielding || r.expected === 'blocked' || (state.task.id === 'ask' && !state.question.trim());
   btn.textContent = running ? 'Working…' : r.expected === 'cloud' ? 'Send masked text' : 'Run';
   $('#btn-stop').hidden = !running;
   const leaks = state.shield?.entities.filter((e) => !e.masked).length ?? 0;
@@ -444,7 +444,16 @@ async function onShield() {
   state.triage = null;
   renderAll();
   const useNano = state.device === 'available';
-  const res = await runShield(state.doc, useNano, state.shield?.entities);
+  const t0 = performance.now();
+  let res = await runShield(state.doc, false, state.shield?.entities);
+  if (useNano) {
+    // Show the instant rule-based result while Nano reads; sending stays locked until it finishes.
+    state.shield = res;
+    renderAll();
+    document.querySelector('#card-review')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    res = await runShield(state.doc, true, res.entities);
+    res.ms = performance.now() - t0;
+  }
   state.shield = res;
   state.shielding = false;
   log({
