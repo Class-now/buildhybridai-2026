@@ -9,6 +9,7 @@ import {
 } from 'firebase/ai';
 import { ai } from './firebase';
 import { routing } from './config';
+import type { Lang } from './lang';
 
 export { InferenceMode, InferenceSource };
 export type Mode = (typeof InferenceMode)[keyof typeof InferenceMode];
@@ -46,6 +47,19 @@ async function availabilityOf(opts: LanguageModelCreateOptions): Promise<DeviceS
 
 export function checkDevice(): Promise<DeviceState> {
   return availabilityOf(CREATE_BASE);
+}
+
+/** Create options for a document in `input` answered in `output` (English is always allowed as input: the instructions are English). */
+export function langOptions(input: Lang, output: Lang): LanguageModelCreateOptions {
+  return {
+    expectedInputs: [{ type: 'text', languages: [...new Set<Lang>(['en', input])] }],
+    expectedOutputs: [{ type: 'text', languages: [output] }],
+  };
+}
+
+/** Can Gemini Nano on this device read `input` and write `output`? */
+export function checkDeviceLang(input: Lang, output: Lang): Promise<DeviceState> {
+  return availabilityOf(langOptions(input, output));
 }
 
 /* ------------------------------------------------------------------ */
@@ -126,6 +140,8 @@ export async function downloadDeviceModel(onProgress: (p: number) => void): Prom
 
 interface ModelOpts {
   system: string;
+  /** Languages of the input document and of the answer (default English). Gemini Nano supports en, es, ja. */
+  lang?: { input: Lang; output: Lang };
   schema?: ReturnType<typeof Schema.object>;
   maxOutputTokens?: number;
 }
@@ -133,7 +149,7 @@ interface ModelOpts {
 const cache = new Map<string, GenerativeModel>();
 
 export function model(mode: Mode, opts: ModelOpts): GenerativeModel {
-  const key = JSON.stringify([mode, opts.system, !!opts.schema, opts.maxOutputTokens, routing.cloudModel, routing.cloudTemperature]);
+  const key = JSON.stringify([mode, opts.system, opts.lang?.input, opts.lang?.output, !!opts.schema, opts.maxOutputTokens, routing.cloudModel, routing.cloudTemperature]);
   const hit = cache.get(key);
   if (hit) return hit;
   const m = getGenerativeModel(ai, {
@@ -150,7 +166,7 @@ export function model(mode: Mode, opts: ModelOpts): GenerativeModel {
     },
     onDeviceParams: {
       createOptions: {
-        ...CREATE_BASE,
+        ...(opts.lang ? langOptions(opts.lang.input, opts.lang.output) : CREATE_BASE),
         initialPrompts: [{ role: 'system', content: [{ type: 'text', value: opts.system }] }],
       },
       ...(opts.schema ? { promptOptions: { responseConstraint: opts.schema } } : {}),

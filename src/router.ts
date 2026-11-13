@@ -2,6 +2,7 @@ import { Schema } from 'firebase/ai';
 import { InferenceMode, type DeviceState, type Mode } from './ai';
 import { DOC_MARK } from './cases';
 import { routing } from './config';
+import { answerInstruction, type Lang } from './lang';
 
 export type Policy = 'auto' | 'private' | 'cloud';
 
@@ -70,8 +71,13 @@ export const CASE_ONLY: TaskId[] = ['connect'];
 
 export const ASSISTANT_SYSTEM = `You help a person understand an official document they received (medical, legal, housing, financial, or government).
 Personal identifiers may have been replaced by placeholders such as [PERSON_1], [ORG_1], [ID_2]. When you refer to them, copy the placeholder exactly; never guess or invent the real values.
-Write plain, warm, concise English. Use short bullet points where it helps. Do not invent facts that are not in the document.
+Write plainly, warmly and concisely. Use short bullet points where it helps. Do not invent facts that are not in the document.
 You are not a doctor or lawyer: when a decision has real consequences, say who the reader should confirm it with.`;
+
+/** The assistant instruction with the answer language added (the document itself may be in English, Spanish or Japanese). */
+export function assistantSystem(lang: Lang): string {
+  return `${ASSISTANT_SYSTEM}\nThe document may be written in English, Spanish or Japanese. ${answerInstruction(lang)}`;
+}
 
 export const TRIAGE_SCHEMA = Schema.object({
   properties: {
@@ -83,6 +89,10 @@ export const TRIAGE_SCHEMA = Schema.object({
 });
 
 export const TRIAGE_SYSTEM = `Classify the document. "deadline" is the earliest date or time limit the reader must act by, copied from the text, or "none". "headline" is one plain sentence (max 15 words) saying what the document is about. Keep placeholders like [PERSON_1] as they are.`;
+
+export function triageSystem(lang: Lang): string {
+  return lang === 'en' ? TRIAGE_SYSTEM : `${TRIAGE_SYSTEM} Write "headline" and "deadline" in the reader's language: ${answerInstruction(lang)}`;
+}
 
 export interface Route {
   mode: Mode;

@@ -74,6 +74,59 @@ Your right to appeal: You or your authorized representative may request an inter
 Send appeals to: Appeals Unit, PO Box 30417, Salt Lake City, UT 84130, fax (801) 555-0177.
 Questions: Member Services 1-800-555-0123. Card on file for premium autopay: 4111 1111 1111 1111.`,
   },
+  {
+    id: 'es-rent',
+    label: 'Español: requerimiento de pago',
+    text: `Gestiones Inmobiliarias Levante S.L.
+Avenida del Puerto 118, 46023 Valencia
+
+Estimada Sra. Lucía Fernández Ortega:
+
+Le escribimos en relación con el contrato de arrendamiento n.º de contrato LV-2024-0387 de la vivienda situada en Calle de la Reina 42, 3º B, 46011 Valencia, de la que usted es titular (DNI 48392017K).
+
+Según nuestros registros, a fecha de 5 de noviembre de 2026 constan impagadas las mensualidades de septiembre y octubre, por un importe total de 1.640,00 €, más 82,00 € de recargo por demora previsto en la cláusula séptima del contrato.
+
+Le requerimos para que abone la cantidad de 1.722,00 € en el plazo de quince (15) días naturales desde la recepción de esta carta, mediante transferencia a la cuenta ES91 2100 0418 4502 0005 1332, indicando como concepto su número de contrato.
+
+Si en dicho plazo no se ha realizado el pago ni se ha puesto en contacto con nosotros, nos veremos obligados a iniciar el procedimiento de desahucio por falta de pago ante el juzgado competente, con las costas a su cargo.
+
+Si ya ha realizado el pago o desea acordar un calendario de pagos, puede llamar al 963 41 27 90 o escribir a cobros@levante-inmo.es.
+
+Atentamente,
+Javier Morales Peña
+Departamento de Administración`,
+  },
+  {
+    id: 'ja-tax',
+    label: '日本語: 保険料の督促状',
+    text: `国民健康保険料　督促状
+
+〒154-0004
+東京都世田谷区太子堂4丁目18-7　コーポ三軒茶屋203号室
+高橋 美咲 様
+
+被保険者番号：13120587
+世帯主：高橋 美咲
+生年月日：1999年4月12日
+
+下記の国民健康保険料が納期限までに納付されていません。
+令和8年11月30日（月）までに、同封の納付書で金融機関・コンビニエンスストアにて納付してください。
+
+未納の内訳
+・令和8年度 第4期（納期限 9月30日）　12,300円
+・令和8年度 第5期（納期限 10月31日）　12,300円
+合計　24,600円
+
+指定期限までに納付がない場合は、延滞金が加算されるほか、財産の差押えなどの滞納処分を行うことがあります。
+また、滞納が続くと、保険証に代わる「資格確認書」の有効期間が短くなることがあります。
+
+収入の減少などで納付が難しい場合は、分割納付や減免の相談ができます。お早めにご連絡ください。
+
+お問い合わせ
+世田谷区役所 保険年金課 収納係
+電話：03-5432-2348（平日 8時30分〜17時15分）
+担当：佐藤 健一`,
+  },
 ];
 
 /** Two follow-up letters about the discharge sample, for the "Try a case folder" demo. */

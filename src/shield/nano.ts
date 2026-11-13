@@ -1,6 +1,7 @@
 import { Schema } from 'firebase/ai';
 import { InferenceMode, model, runOnce } from '../ai';
 import type { EntityType, Span } from './types';
+import { detectLang } from '../lang';
 
 const TYPES: EntityType[] = ['PERSON', 'ORG', 'ADDRESS', 'EMAIL', 'PHONE', 'ID', 'ACCOUNT', 'DOB', 'OTHER'];
 
@@ -21,7 +22,7 @@ const SYSTEM = `You are a privacy filter that runs entirely on the user's device
 Find every value in the document that could identify a specific person:
 people's names, organizations tied to the person (clinics, hospitals, employers, landlords, banks, insurers, schools),
 street addresses, phone numbers, email addresses, ID / account / policy / case / claim numbers, and dates of birth.
-Copy each value exactly as it is written in the document.
+The document may be in English, Spanish or Japanese. Copy each value exactly as it is written in the document, in its original script (do not translate or romanize).
 Do not include generic dates, deadlines, money amounts, medical or legal terms, job titles, or common words.`;
 
 const CHUNK = 2500;
@@ -31,6 +32,10 @@ const NOT_IDENTIFYING = new RegExp(
     String.raw`^(within\s+|in\s+|after\s+)?\d+\s*(more\s+)?(minutes?|hours?|days?|weeks?|months?|years?)$`, // "7 days", "in 2 weeks"
     String.raw`^\d{1,2}[/.-]\d{1,2}([/.-]\d{2,4})?$`, // "10/28", "10/28/2026"
     String.raw`^\d+(\.\d+)?\s*(lbs?|pounds?|kg|g|mg|mcg|ml|l|%|percent)$`, // "2 lb", "40 mg"
+    String.raw`^((昭和|平成|令和)?\d{1,4}年)?\d{1,2}月\d{1,2}日.*$`, // "2026年11月30日", "11月30日（月）"
+    String.raw`^\d+\s*(日|週間|か月|ヶ月|年)(以内|後|間)?$`, // "14日以内"
+    String.raw`^[\d,]+\s*円$`, // "48,600円"
+    String.raw`^\d+\s*(días?|semanas?|meses?|años?)$`, // "15 días"
     String.raw`^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(,?\s+\d{4})?$`, // "Oct 28, 2026"
   ].join('|'),
   'i',
@@ -57,7 +62,8 @@ function chunks(text: string): string[] {
  * this step reads the raw document, so it must never fall back to the cloud.
  */
 export async function detectWithNano(text: string): Promise<Span[]> {
-  const m = model(InferenceMode.ONLY_ON_DEVICE, { system: SYSTEM, schema });
+  const lang = detectLang(text);
+  const m = model(InferenceMode.ONLY_ON_DEVICE, { system: SYSTEM, schema, lang: { input: lang, output: lang } });
   const spans: Span[] = [];
   for (const part of chunks(text)) {
     const r = await runOnce(m, `Document:\n"""\n${part}\n"""`);

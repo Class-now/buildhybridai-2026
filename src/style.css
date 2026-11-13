@@ -274,3 +274,8 @@ textarea:focus { outline: 2px solid var(--device); border-color: transparent; }
 #card-routing dt { color: var(--ink-3); }
 #card-routing dd { margin: 0; color: var(--ink-2); }
 #card-routing .notice { background: var(--warn-bg); border: 1px solid #f5d9a8; border-radius: 10px; padding: 8px 10px; font-size: 0.86rem; }
+
+/* Answer language (Nov 14) */
+.lang-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; font-size: 14px; }
+.lang-row select { font: inherit; border: 1px solid var(--line-2); background: var(--paper); color: inherit; border-radius: 8px; padding: 5px 8px; }
+.lang-tag { font-size: 12px; border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 8px; }

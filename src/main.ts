@@ -1,6 +1,7 @@
 import './style.css';
 import {
   checkDevice,
+  checkDeviceLang,
   checkVision,
   downloadDeviceModel,
   friendlyError,
@@ -14,7 +15,8 @@ import {
   type Source,
 } from './ai';
 import { addDoc, createCase, deleteCase, joinCase, loadCases, removeDoc, setReleased, type CaseFolder } from './cases';
-import { ASSISTANT_SYSTEM, buildPrompt, CASE_ONLY, route, TASKS, weightOf, TRIAGE_SCHEMA, TRIAGE_SYSTEM, type Policy, type Task } from './router';
+import { assistantSystem, buildPrompt, CASE_ONLY, route, TASKS, weightOf, TRIAGE_SCHEMA, triageSystem, type Policy, type Task } from './router';
+import { detectLang, LANG_NAME, LANGS, resolveAnswerLang, type AnswerLang, type Lang } from './lang';
 import { CASE_DEMO, SAMPLES } from './samples';
 import { loadRouting, routing } from './config';
 import { renderLetterImage } from './letter';
@@ -53,6 +55,7 @@ interface Answer {
   ms?: number;
   error?: string;
   running: boolean;
+  lang: Lang;
 }
 
 interface Triage {
@@ -84,8 +87,27 @@ const state = {
   /** Id of the case whose documents are open together in the editor. */
   caseOpen: '' as string,
   naming: false,
+  /** Answer language: "same" follows the document. Remembered in this browser. */
+  answerLang: loadAnswerLang(),
+  /** Can Gemini Nano read the document's language and write the answer language? */
+  deviceLang: 'checking' as DeviceState,
   scan: null as null | { previewUrl: string; text: string; part: number; parts: number; running: boolean; error?: string; ms?: number },
 };
+
+function loadAnswerLang(): AnswerLang {
+  try {
+    const v = localStorage.getItem('veil.answerLang');
+    if (v === 'same' || (LANGS as string[]).includes(v ?? '')) return v as AnswerLang;
+  } catch {
+    /* storage blocked */
+  }
+  return 'same';
+}
+
+const docLang = (): Lang => detectLang(state.doc);
+const outLang = (): Lang => resolveAnswerLang(state.answerLang, docLang());
+/** The device counts as ready only if Nano supports this document's language pair. */
+const deviceForLang = (): DeviceState => (state.device === 'available' ? state.deviceLang : state.device);
 
 let ledgerSeq = 0;
 let abort: AbortController | null = null;
@@ -151,6 +173,14 @@ app.innerHTML = `
       </div>
       <div class="tasks" id="tasks">
         ${TASKS.map((t) => `<button type="button" class="task" data-task="${t.id}"><b>${esc(t.label)}</b><span>${esc(t.hint)}</span><em class="w-${t.weight}">${t.weight === 'heavy' ? 'cloud' : 'device'}</em></button>`).join('')}
+      </div>
+      <div class="lang-row">
+        <label for="answer-lang">Answer in</label>
+        <select id="answer-lang">
+          <option value="same">Same as the document</option>
+          ${LANGS.map((l) => `<option value="${l}">${LANG_NAME[l]}</option>`).join('')}
+        </select>
+        <span class="muted small" id="lang-note"></span>
       </div>
       <input type="text" id="question" placeholder="e.g. Can I still take ibuprofen with these medicines?" hidden />
       <div class="route" id="route"></div>
@@ -329,7 +359,7 @@ const MODE_LABEL: Record<string, string> = {
 };
 
 function currentRoute() {
-  return route(state.task, state.policy, state.device, state.online, state.doc.length);
+  return route(state.task, state.policy, deviceForLang(), state.online, state.doc.length);
 }
 
 function renderAsk() {
@@ -345,6 +375,18 @@ function renderAsk() {
     em.textContent = w === 'heavy' ? 'cloud' : 'device';
   });
   questionEl.hidden = state.task.id !== 'ask';
+  $<HTMLSelectElement>('#answer-lang').value = state.answerLang;
+  const dl = docLang();
+  const ol = outLang();
+  const nano =
+    state.device !== 'available'
+      ? ''
+      : state.deviceLang === 'available'
+        ? ' · Gemini Nano handles this pair'
+        : state.deviceLang === 'checking'
+          ? ''
+          : ' · Gemini Nano does not support this pair here, so device tasks use the masked cloud path';
+  $('#lang-note').textContent = `Document: ${LANG_NAME[dl]} → answer: ${LANG_NAME[ol]}${nano}`;
   const r = currentRoute();
   const dest =
     r.expected === 'device'
@@ -380,7 +422,7 @@ function renderAnswer() {
   card.innerHTML = `
     <header class="ans-h">
       <div><h2>${esc(a.task.label)}</h2>${a.question ? `<p class="muted">“${esc(a.question)}”</p>` : ''}</div>
-      <div class="ans-meta">${sourceBadge(a.source)}<code>${MODE_LABEL[a.mode]}</code>${a.ms ? `<span class="muted">${fmtMs(a.ms)}</span>` : ''}</div>
+      <div class="ans-meta"><span class="lang-tag" title="Answer language">${LANG_NAME[a.lang]}</span>${sourceBadge(a.source)}<code>${MODE_LABEL[a.mode]}</code>${a.ms ? `<span class="muted">${fmtMs(a.ms)}</span>` : ''}</div>
     </header>
     ${body}
     ${a.text && !a.raw ? `<div class="ans-f"><label class="switch"><input type="checkbox" id="seen" ${state.showSeen ? 'checked' : ''}/> Show exactly what the model saw and wrote</label><span class="muted small">Highlighted values were restored on your device.</span></div>` : ''}
@@ -519,8 +561,19 @@ function renderAll() {
 /* Actions                                                             */
 /* ------------------------------------------------------------------ */
 
+async function refreshLang() {
+  const pair: [Lang, Lang] = [docLang(), outLang()];
+  if (state.device !== 'available') {
+    state.deviceLang = state.device;
+  } else {
+    state.deviceLang = await checkDeviceLang(...pair);
+  }
+  renderAsk();
+}
+
 async function refreshDevice() {
   state.device = await checkDevice();
+  void refreshLang();
   renderStatus();
   renderAsk();
 }
@@ -547,6 +600,7 @@ async function onShield() {
   state.answer = null;
   state.triage = null;
   renderAll();
+  void refreshLang();
   const useNano = state.device === 'available';
   const t0 = performance.now();
   const c = state.caseOpen ? state.cases.find((x) => x.id === state.caseOpen) : undefined;
@@ -581,7 +635,7 @@ async function onShield() {
 /** Triage with structured output. Auto-runs only on device; the cloud needs a click. */
 async function runTriage(cloudConsent: boolean) {
   if (!state.shield) return;
-  if (!cloudConsent && state.device !== 'available') {
+  if (!cloudConsent && deviceForLang() !== 'available') {
     state.triageState = 'needs-consent';
     renderTriage();
     return;
@@ -590,7 +644,7 @@ async function runTriage(cloudConsent: boolean) {
   renderTriage();
   const mode = cloudConsent ? InferenceMode.ONLY_IN_CLOUD : InferenceMode.PREFER_ON_DEVICE;
   const text = maskedDoc();
-  const m = model(mode, { system: TRIAGE_SYSTEM, schema: TRIAGE_SCHEMA, maxOutputTokens: 300 });
+  const m = model(mode, { system: triageSystem(outLang()), schema: TRIAGE_SCHEMA, maxOutputTokens: 300, lang: { input: docLang(), output: outLang() } });
   const counts = maskCounts();
   try {
     const r = await runOnce(m, `--- DOCUMENT ---\n${text}\n--- END ---`);
@@ -616,10 +670,11 @@ async function onRun() {
   if (r.expected === 'blocked') return;
   const text = r.raw ? state.shield.original : maskedDoc();
   const prompt = buildPrompt(state.task, text, state.question);
-  const m = model(r.mode, { system: ASSISTANT_SYSTEM });
+  const lang = { input: docLang(), output: outLang() };
+  const m = model(r.mode, { system: assistantSystem(lang.output), lang });
   abort = new AbortController();
   state.showSeen = false;
-  state.answer = { task: state.task, question: state.task.id === 'ask' ? state.question : undefined, prompt, raw: r.raw, text: '', mode: r.mode, running: true };
+  state.answer = { task: state.task, question: state.task.id === 'ask' ? state.question : undefined, prompt, raw: r.raw, text: '', mode: r.mode, running: true, lang: lang.output };
   renderAnswer();
   renderAsk();
   document.querySelector('#card-answer')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -903,6 +958,17 @@ void loadRouting(() => {
   renderRouting();
   renderAsk();
 });
+$<HTMLSelectElement>('#answer-lang').addEventListener('change', (e) => {
+  state.answerLang = (e.target as HTMLSelectElement).value as AnswerLang;
+  try {
+    localStorage.setItem('veil.answerLang', state.answerLang);
+  } catch {
+    /* storage blocked */
+  }
+  renderAsk();
+  void refreshLang();
+});
+
 // Chrome may finish a background download while the page is open.
 setInterval(() => {
   if (state.device === 'downloadable' || state.device === 'downloading') void refreshDevice();
@@ -913,4 +979,4 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 }
 
 // Exposed for automated tests only (no user data is reachable through it beyond what is on screen).
-(window as unknown as { __veil: unknown }).__veil = { state, buildEntities, routing: () => routing };
+(window as unknown as { __veil: unknown }).__veil = { state, buildEntities, routing: () => routing, docLang, outLang };

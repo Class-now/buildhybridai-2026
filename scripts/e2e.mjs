@@ -59,9 +59,16 @@ async function newPage(stubNano, rcTemplate) {
         if (JSON.stringify(input).includes('"type":"image"')) window.__imageCalls++;
         return origStreaming(input, opts);
       };
+      // Languages this stand-in "device" supports (tests can narrow it to check the fallback).
+      const supported = () => window.__nanoLangs ?? ['en', 'es', 'ja'];
+      const langsOf = (o) => [...(o?.expectedInputs ?? []), ...(o?.expectedOutputs ?? [])].flatMap((x) => x.languages ?? []);
+      window.__creates = [];
       window.LanguageModel = {
-        availability: async () => 'available',
-        create: async () => session,
+        availability: async (o) => (langsOf(o).every((l) => supported().includes(l)) ? 'available' : 'unavailable'),
+        create: async (o) => {
+          window.__creates.push(JSON.parse(JSON.stringify(o ?? {})));
+          return session;
+        },
       };
       window.__nanoStub = true;
     });
@@ -251,6 +258,56 @@ async function newPage(stubNano, rcTemplate) {
   check('cloud switched off: Auto runs ONLY_ON_DEVICE, Cloud mode is blocked, nothing sent', cloudBlocked && a.mode === 'only_on_device' && a.source === 'on_device' && cloudBodies.length === 0, `${a.mode} → ${a.source}; cloud blocked: ${cloudBlocked}; ${cloudBodies.length} request(s)`);
   await page.locator('#card-routing').scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${out}/13-routing-remote-config.png`, fullPage: false });
+  await ctx.close();
+}
+
+// ---------- 6. Languages (Spanish and Japanese documents, answer language) ----------
+{
+  const { ctx, page, cloudBodies } = await newPage(false);
+  const cases = [
+    ['es-rent', 'es', ['Lucía', 'Fernández', '48392017K', 'LV-2024-0387', 'Reina 42', 'ES91 2100', '963 41 27 90', 'cobros@', 'Morales', 'Inmobiliarias Levante']],
+    ['ja-tax', 'ja', ['高橋', '美咲', '13120587', '154-0004', '太子堂', '1999年4月12日', '5432-2348', '佐藤', '世田谷区役所']],
+  ];
+  for (const [id, lang, raw] of cases) {
+    await page.click(`[data-sample="${id}"]`);
+    await page.click('#btn-shield');
+    await page.waitForFunction(() => !window.__veil.state.shielding && window.__veil.state.shield, null, { timeout: 20000 });
+    const got = await page.evaluate(() => window.__veil.docLang());
+    await page.click('[data-view="outbound"]');
+    const outbound = (await page.textContent('#doc-view')) ?? '';
+    const leaked = raw.filter((r) => outbound.includes(r));
+    const kept = id === 'ja-tax' ? ['24,600円', '令和8年11月30日'] : ['1.722,00 €', 'quince (15) días'];
+    const lost = kept.filter((k) => !outbound.includes(k));
+    check(`${lang} document: detected as ${lang}, identifiers masked by rules, amounts and deadlines kept`, got === lang && leaked.length === 0 && lost.length === 0, `lang ${got}; leaked: ${leaked.join(', ') || 'none'}; lost: ${lost.join(', ') || 'none'}`);
+    await page.screenshot({ path: `${out}/${id === 'ja-tax' ? '15' : '14'}-${id}-outbound.png`, fullPage: false });
+  }
+  check('no request reached Google while shielding other languages', cloudBodies.length === 0, `${cloudBodies.length} request(s)`);
+  await ctx.close();
+}
+{
+  // English letter, answer in Spanish, on the device.
+  const { ctx, page, cloudBodies } = await newPage(true);
+  await page.waitForFunction(() => document.querySelector('#pill-device')?.textContent?.includes('Gemini Nano ready'));
+  await page.click('[data-sample="discharge"]');
+  await page.click('#btn-shield');
+  await page.waitForFunction(() => !window.__veil.state.shielding && window.__veil.state.shield, null, { timeout: 30000 });
+  await page.selectOption('#answer-lang', 'es');
+  await page.click('[data-task="summary"]');
+  await page.click('#btn-run');
+  await page.waitForFunction(() => { const a = window.__veil.state.answer; return a && !a.running; }, null, { timeout: 30000 });
+  const r = await page.evaluate(() => ({ a: window.__veil.state.answer, c: window.__creates.at(-1) }));
+  const outLangs = r.c?.expectedOutputs?.[0]?.languages ?? [];
+  const sys = JSON.stringify(r.c?.initialPrompts ?? '');
+  check('answer in Spanish runs on device with Nano asked for Spanish output', r.a.lang === 'es' && r.a.source === 'on_device' && outLangs.join() === 'es' && /Spanish/.test(sys) && cloudBodies.length === 0, `${r.a.mode} → ${r.a.source}; outputs ${outLangs.join()}; ${cloudBodies.length} request(s)`);
+  await page.locator('#card-ask').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${out}/16-answer-language.png`, fullPage: false });
+  // A device whose Nano lacks Japanese: device-first tasks are routed to the masked cloud path instead.
+  await page.evaluate(() => { window.__nanoLangs = ['en', 'es']; });
+  await page.selectOption('#answer-lang', 'ja');
+  await page.waitForFunction(() => window.__veil.state.deviceLang === 'unavailable', null, { timeout: 10000 });
+  const routeText = (await page.textContent('#route')) ?? '';
+  const note = (await page.textContent('#lang-note')) ?? '';
+  check('Nano without Japanese: light task falls back to the masked cloud path, and the UI says why', /PREFER_ON_DEVICE/.test(routeText) && /Expected: Gemini in the cloud/.test(routeText) && /does not support/.test(note), `${routeText.slice(0, 80)} | ${note}`);
   await ctx.close();
 }
 

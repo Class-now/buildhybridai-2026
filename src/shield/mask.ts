@@ -4,6 +4,7 @@ const PRIORITY: Record<EntityType, number> = {
   EMAIL: 9, URL: 9, ACCOUNT: 8, ID: 8, DOB: 8, PHONE: 7, ADDRESS: 6, PERSON: 5, ORG: 5.5, OTHER: 3,
 };
 
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -11,7 +12,8 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function occurrences(text: string, value: string): Array<[number, number]> {
   const out: Array<[number, number]> = [];
   const pattern = escapeRe(value).replace(/ +/g, '\\s+');
-  const re = new RegExp(`(?<![\\p{L}\\p{N}])${pattern}(?![\\p{L}\\p{N}])`, 'giu');
+  // Japanese has no spaces between words, so word boundaries would hide "山田" in "山田様".
+  const re = CJK.test(value) ? new RegExp(pattern, 'gu') : new RegExp(`(?<![\\p{L}\\p{N}])${pattern}(?![\\p{L}\\p{N}])`, 'giu');
   for (const m of text.matchAll(re)) out.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
   return out;
 }
@@ -32,7 +34,7 @@ export function resolveSpans(text: string, raw: Span[]): Span[] {
   // Surnames / first names of multi-word people names.
   for (const s of [...seeds.values()]) {
     if (s.type !== 'PERSON') continue;
-    const parts = s.text.split(/\s+/).filter((p) => p.length >= 3 && !/\.$/.test(p));
+    const parts = s.text.split(/\s+/).filter((p) => (p.length >= 3 || (CJK.test(p) && p.length >= 2)) && !/\.$/.test(p));
     if (parts.length < 2) continue;
     for (const p of [parts[0], parts[parts.length - 1]]) {
       const k = norm(p);
