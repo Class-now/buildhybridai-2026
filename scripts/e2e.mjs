@@ -28,6 +28,9 @@ async function newPage(stubNano) {
       // Minimal stand-in for Chrome's built-in Prompt API, for testing routing only.
       const answer = (input, opts) => {
         const text = JSON.stringify(input);
+        if (text.includes('"type":"image"')) {
+          return 'Notice to Quit. To: Rosa Delgado. This notice concerns your unit. Please call 555-0142.';
+        }
         if (opts && opts.responseConstraint) {
           if (text.includes('Classify') || text.includes('--- END ---')) {
             return JSON.stringify({ category: 'medical', urgency: 'this-week', deadline: 'within 7 days', headline: 'Discharge plan for [PERSON_1] with new heart medicines.' });
@@ -43,6 +46,12 @@ async function newPage(stubNano) {
           return new ReadableStream({ start(c) { for (const p of s.match(/.{1,40}/gs)) c.enqueue(p); c.close(); } });
         },
         destroy() {},
+      };
+      window.__imageCalls = 0;
+      const origStreaming = session.promptStreaming;
+      session.promptStreaming = (input, opts) => {
+        if (JSON.stringify(input).includes('"type":"image"')) window.__imageCalls++;
+        return origStreaming(input, opts);
       };
       window.LanguageModel = {
         availability: async () => 'available',
@@ -68,6 +77,11 @@ async function newPage(stubNano) {
   await page.screenshot({ path: `${out}/01-empty.png`, fullPage: false });
   const pill = await page.textContent('#pill-device');
   check('device pill reflects Prompt API state (no model ready)', /not in this browser|unavailable|download needed/i.test(pill ?? ''), pill ?? '');
+  // Scan without Nano: refuses, and the photo is never sent anywhere.
+  await page.click('#btn-scan-sample');
+  await page.waitForFunction(() => { const s = window.__veil.state.scan; return s && !s.running; }, null, { timeout: 20000 });
+  const scan0 = await page.evaluate(() => window.__veil.state.scan);
+  check('scan without Nano refuses with a reason and sends nothing', !!scan0.error && cloudBodies.length === 0, `${(scan0.error ?? '').slice(0, 60)}; ${cloudBodies.length} request(s)`);
   await page.click('[data-sample="discharge"]');
   await page.click('#btn-shield');
   await page.waitForSelector('#card-review:not([hidden])');
@@ -121,6 +135,13 @@ async function newPage(stubNano) {
   const { ctx, page, cloudBodies } = await newPage(true);
   await page.waitForFunction(() => document.querySelector('#pill-device')?.textContent?.includes('Gemini Nano ready'));
   check('device pill shows Gemini Nano ready with Prompt API present', true);
+  // Scan with Nano: the photo is read on device and fills the document box.
+  await page.click('#btn-scan-sample');
+  await page.waitForFunction(() => { const s = window.__veil.state.scan; return s && !s.running; }, null, { timeout: 30000 });
+  const scan1 = await page.evaluate(() => ({ scan: window.__veil.state.scan, doc: window.__veil.state.doc, calls: window.__imageCalls }));
+  check('scan reads the photo on device into the document', !scan1.scan.error && /Rosa Delgado/.test(scan1.doc) && scan1.calls >= 1, scan1.scan.error ?? `${scan1.calls} image call(s), ${scan1.doc.length} chars`);
+  check('no request reached Google while scanning', cloudBodies.length === 0, `${cloudBodies.length} request(s)`);
+  await page.screenshot({ path: `${out}/10-scan-on-device.png`, fullPage: false });
   await page.click('[data-sample="discharge"]');
   await page.click('#btn-shield');
   await page.waitForSelector('.triage:not(.loading) .tag', { timeout: 20000 });

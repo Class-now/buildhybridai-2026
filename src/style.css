@@ -246,3 +246,12 @@ textarea:focus { outline: 2px solid var(--device); border-color: transparent; }
 @media (max-width: 800px) { .arrow { display: none; } }
 .how > p { font-size: 0.85rem; margin-top: 14px; }
 .foot { text-align: center; color: var(--ink-3); font-size: 0.8rem; padding: 18px 16px 36px; }
+
+/* Scan */
+.scan-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.scan-row label.btn { cursor: pointer; }
+.scan { display: flex; gap: 14px; align-items: flex-start; border: 1px solid #a7ddd4; background: var(--device-bg); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+.scan.fail { border-color: #e6b9a8; background: #fdf3ee; }
+.scan img { width: 120px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.18); flex: none; }
+.scan pre { white-space: pre-wrap; font-size: 0.8rem; max-height: 9em; overflow: hidden; margin: 6px 0 0; }
+.scan p { margin: 6px 0 0; }

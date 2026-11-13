@@ -31,16 +31,79 @@ interface PromptApi {
 }
 const promptApi = (): PromptApi | undefined => (globalThis as unknown as { LanguageModel?: PromptApi }).LanguageModel;
 
-export async function checkDevice(): Promise<DeviceState> {
+async function availabilityOf(opts: LanguageModelCreateOptions): Promise<DeviceState> {
   const api = promptApi();
   if (!api) return 'no-api';
   try {
-    const a = await api.availability(CREATE_BASE);
+    const a = await api.availability(opts);
     if (a === 'available' || a === 'downloadable' || a === 'downloading') return a;
     return 'unavailable';
   } catch {
     return 'unavailable';
   }
+}
+
+export function checkDevice(): Promise<DeviceState> {
+  return availabilityOf(CREATE_BASE);
+}
+
+/* ------------------------------------------------------------------ */
+/* Image input (reading a photo of a paper letter)                      */
+/* ------------------------------------------------------------------ */
+
+// Kept separate from CREATE_BASE on purpose: image input needs more from the device
+// (a Chrome flag on some versions, GPU memory). Asking for it everywhere would make
+// the text-only availability() check fail on machines that can run text just fine.
+const CREATE_VISION: LanguageModelCreateOptions = {
+  expectedInputs: [{ type: 'image' }, { type: 'text', languages: ['en'] }],
+  expectedOutputs: [{ type: 'text', languages: ['en'] }],
+};
+
+export function checkVision(): Promise<DeviceState> {
+  return availabilityOf(CREATE_VISION);
+}
+
+let vision: GenerativeModel | undefined;
+
+/**
+ * The only model that ever receives image bytes. It is created with ONLY_ON_DEVICE and
+ * has no cloud parameters, so Firebase AI Logic can never route a photo to the cloud:
+ * if the device cannot read images, the call fails instead of falling back.
+ */
+export function visionModel(system: string): GenerativeModel {
+  vision ??= getGenerativeModel(ai, {
+    mode: InferenceMode.ONLY_ON_DEVICE,
+    onDeviceParams: {
+      createOptions: {
+        ...CREATE_VISION,
+        initialPrompts: [{ role: 'system', content: [{ type: 'text', value: system }] }],
+      },
+    },
+  });
+  return vision;
+}
+
+/** Stream a prompt made of one image (base64, PNG or JPEG) and an instruction. */
+export async function runVision(
+  m: GenerativeModel,
+  image: { data: string; mimeType: 'image/png' | 'image/jpeg' },
+  instruction: string,
+  onDelta: (text: string) => void,
+  signal?: AbortSignal,
+): Promise<RunResult> {
+  const t0 = performance.now();
+  const res = await m.generateContentStream([{ type: 'inlineData', inlineData: image }, { type: 'text', text: instruction }], { signal });
+  let text = '';
+  for await (const chunk of res.stream) {
+    try {
+      text += chunk.text();
+    } catch {
+      /* empty chunk */
+    }
+    onDelta(text);
+  }
+  const final = await res.response;
+  return { text, source: final.inferenceSource ?? InferenceSource.ON_DEVICE, ms: performance.now() - t0 };
 }
 
 /** Must be called from a user gesture. Resolves when the model is ready. */

@@ -1,6 +1,7 @@
 import './style.css';
 import {
   checkDevice,
+  checkVision,
   downloadDeviceModel,
   friendlyError,
   InferenceMode,
@@ -14,6 +15,8 @@ import {
 } from './ai';
 import { ASSISTANT_SYSTEM, buildPrompt, route, TASKS, TRIAGE_SCHEMA, TRIAGE_SYSTEM, type Policy, type Task } from './router';
 import { SAMPLES } from './samples';
+import { renderLetterImage } from './letter';
+import { ACCEPTED_IMAGE, prepareImage, transcribe, type PreparedImage } from './scan';
 import { applyMask, buildEntities, bytes } from './shield/mask';
 import { runShield } from './shield/shield';
 import { ENTITY_LABEL, type Entity, type ShieldResult } from './shield/types';
@@ -74,6 +77,7 @@ const state = {
   answer: null as Answer | null,
   showSeen: false,
   ledger: [] as LedgerEntry[],
+  scan: null as null | { previewUrl: string; text: string; part: number; parts: number; running: boolean; error?: string; ms?: number },
 };
 
 let ledgerSeq = 0;
@@ -104,6 +108,12 @@ app.innerHTML = `
         <span>Try a sample:</span>
         ${SAMPLES.map((s) => `<button type="button" class="chip" data-sample="${s.id}">${esc(s.label)}</button>`).join('')}
       </div>
+      <div class="scan-row">
+        <label class="btn" id="btn-scan">Scan a paper letter<input type="file" id="scan-file" accept="image/*" capture="environment" hidden /></label>
+        <button type="button" class="chip" id="btn-scan-sample">Try a scanned letter</button>
+        <span class="muted small">Photos are read by Gemini Nano on this device. Image bytes never go to the cloud.</span>
+      </div>
+      <div id="scan" hidden></div>
       <textarea id="doc" spellcheck="false" placeholder="Paste the text of a document here…"></textarea>
       <div class="card-f">
         <span class="muted" id="doc-meta">0 characters</span>
@@ -400,7 +410,24 @@ function log(e: Omit<LedgerEntry, 'id' | 'at'>) {
   renderLedger();
 }
 
+function renderScan() {
+  const el = $('#scan');
+  const sc = state.scan;
+  el.hidden = !sc;
+  if (!sc) return;
+  const head = sc.running
+    ? `Reading the photo on device${sc.parts > 1 ? ` — part ${sc.part} of ${sc.parts}` : ''}…`
+    : sc.error
+      ? 'Could not read the photo'
+      : `Read on device in ${fmtMs(sc.ms ?? 0)} — check the text below, then shield it.`;
+  el.className = `scan ${sc.error ? 'fail' : ''}`;
+  el.innerHTML = `<img src="${sc.previewUrl}" alt="Photo of the letter" />
+    <div><b>${esc(head)}</b>${sc.error ? `<p>${esc(sc.error)}</p>` : sc.running ? `<pre>${esc(sc.text.slice(-600))}</pre>` : ''}
+    <p class="muted small"><code>ONLY_ON_DEVICE</code> · the image model has no cloud fallback.</p></div>`;
+}
+
 function renderAll() {
+  renderScan();
   renderStatus();
   renderReview();
   renderAsk();
@@ -560,6 +587,61 @@ function fallbackNote(mode: Mode, source: Source): string | undefined {
   return undefined;
 }
 
+function resetDoc(text: string) {
+  docEl.value = text;
+  state.doc = text;
+  state.shield = null;
+  state.answer = null;
+  state.triage = null;
+  state.triageState = 'idle';
+}
+
+async function onScan(file: Blob) {
+  if (state.scan?.running) return;
+  if (state.scan) URL.revokeObjectURL(state.scan.previewUrl);
+  let img: PreparedImage;
+  try {
+    img = await prepareImage(file);
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+    return;
+  }
+  state.scan = { previewUrl: img.previewUrl, text: '', part: 1, parts: img.tiles.length, running: true };
+  renderAll();
+  const vision = await checkVision();
+  if (vision !== 'available') {
+    state.scan.running = false;
+    state.scan.error =
+      vision === 'downloadable' || vision === 'downloading'
+        ? 'Gemini Nano needs to finish downloading before it can read photos. Veil will not send the photo to the cloud instead.'
+        : 'Reading photos needs Gemini Nano with image input (Chrome 139+ with the multimodal Prompt API enabled). Veil will not send the photo to the cloud instead — paste the text, or try on a device with Gemini Nano.';
+    log({ stage: 'Scan · read photo', mode: InferenceMode.ONLY_ON_DEVICE, source: InferenceSource.ON_DEVICE, ms: 0, sentBytes: 0, withheld: 0, leaked: 0, ok: false, note: 'Image input unavailable — photo stayed on device, nothing sent.' });
+    renderAll();
+    return;
+  }
+  abort = new AbortController();
+  try {
+    const r = await transcribe(
+      img,
+      (text, part, parts) => {
+        if (!state.scan) return;
+        Object.assign(state.scan, { text, part, parts });
+        renderScan();
+      },
+      abort.signal,
+    );
+    resetDoc(r.text);
+    Object.assign(state.scan, { running: false, ms: r.ms, text: r.text });
+    log({ stage: 'Scan · read photo', mode: InferenceMode.ONLY_ON_DEVICE, source: InferenceSource.ON_DEVICE, ms: r.ms, sentBytes: 0, withheld: 0, leaked: 0, ok: true, note: `${fmtBytes(img.bytes)} photo, ${r.tiles} part(s), ${r.text.length.toLocaleString()} characters read.` });
+  } catch (e) {
+    Object.assign(state.scan, { running: false, error: friendlyError(e, state.online) });
+    log({ stage: 'Scan · read photo', mode: InferenceMode.ONLY_ON_DEVICE, source: InferenceSource.ON_DEVICE, ms: 0, sentBytes: 0, withheld: 0, leaked: 0, ok: false, note: 'Reading failed — nothing was sent.' });
+  }
+  abort = null;
+  renderAll();
+  docEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 function toggleEntity(key: string) {
   const sh = state.shield;
   if (!sh) return;
@@ -588,16 +670,26 @@ docEl.addEventListener('input', () => {
 document.querySelectorAll<HTMLButtonElement>('[data-sample]').forEach((b) =>
   b.addEventListener('click', () => {
     const s = SAMPLES.find((x) => x.id === b.dataset.sample)!;
-    docEl.value = s.text;
-    state.doc = s.text;
-    state.shield = null;
-    state.answer = null;
-    state.triage = null;
-    state.triageState = 'idle';
+    resetDoc(s.text);
     renderAll();
   }),
 );
 
+$<HTMLInputElement>('#scan-file').addEventListener('change', (e) => {
+  const input = e.target as HTMLInputElement;
+  const f = input.files?.[0];
+  input.value = '';
+  if (!f) return;
+  if (!ACCEPTED_IMAGE.test(f.type)) {
+    alert('Use a JPEG or PNG photo of the letter.');
+    return;
+  }
+  void onScan(f);
+});
+$('#btn-scan-sample').addEventListener('click', async () => {
+  const s = SAMPLES.find((x) => x.id === 'eviction') ?? SAMPLES[0];
+  void onScan(await renderLetterImage(s.text));
+});
 $('#btn-shield').addEventListener('click', () => void onShield());
 $('#btn-run').addEventListener('click', () => void onRun());
 $('#btn-stop').addEventListener('click', () => abort?.abort());
