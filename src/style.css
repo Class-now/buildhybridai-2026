@@ -268,3 +268,9 @@ textarea:focus { outline: 2px solid var(--device); border-color: transparent; }
 .case-doc .chip { max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .case-doc .x { border: 0; background: none; color: var(--ink-2); font-size: 1rem; padding: 0 6px; cursor: pointer; }
 .case-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Routing policy (Remote Config) */
+#card-routing .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0 0 10px; font-size: 0.86rem; }
+#card-routing dt { color: var(--ink-3); }
+#card-routing dd { margin: 0; color: var(--ink-2); }
+#card-routing .notice { background: var(--warn-bg); border: 1px solid #f5d9a8; border-radius: 10px; padding: 8px 10px; font-size: 0.86rem; }

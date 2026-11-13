@@ -51,6 +51,7 @@ flowchart LR
 | Long documents (over ~20k chars) | `PREFER_IN_CLOUD` | masked | beyond the on-device context window |
 | Private mode | `ONLY_ON_DEVICE` | raw | nothing leaves the device |
 | Cloud mode | `ONLY_IN_CLOUD` | masked | best quality on demand |
+| Cloud paused (Remote Config `cloud_enabled=false`) | `ONLY_ON_DEVICE` | masked | operator switch; no cloud fallback |
 
 Implementation notes:
 
@@ -60,7 +61,7 @@ Implementation notes:
 - Surnames of detected people are masked everywhere ("Ms. Alvarez" shares `[PERSON_1]` with "Maria Elena Alvarez").
 - A small service worker keeps the app shell available offline. Model calls are never cached.
 
-Code map: `src/ai.ts` (capability check, model factory, streaming, errors) · `src/router.ts` (tasks and the routing policy) · `src/shield/` (rules, Nano detector, masking and restore) · `src/main.ts` (UI).
+Code map: `src/config.ts` (routing policy from Remote Config) · `src/ai.ts` (capability check, model factory, streaming, errors) · `src/router.ts` (tasks and the routing policy) · `src/shield/` (rules, Nano detector, masking and restore) · `src/main.ts` (UI).
 
 ## Built during the submission period (from Nov 11, 2026 PT)
 
@@ -68,6 +69,7 @@ Veil's first version (shield, mask, hybrid routing, privacy receipt) went live o
 
 - **Scan a paper letter (Nov 13).** Take or upload a photo of a letter; Gemini Nano's image input reads it on the device and fills the document box. The image model is created with `ONLY_ON_DEVICE` and no cloud parameters, so a photo can never fall back to the cloud: on a device without image input Veil says so and sends nothing. Tall pages are cut into overlapping bands to keep small print legible, and the band texts are joined without duplicated lines. "Try a scanned letter" renders a sample letter as a photo in the browser so the feature can be tried without a camera.
 - **Case folders (Nov 14).** Real problems come in several letters: the discharge note, the hospital bill, the insurer's explanation of benefits. A case folder keeps related documents together in this browser (localStorage, never uploaded). "Open the whole case" shields every document together, so one person gets one placeholder across all of them — even when the insurer writes "Maria E. Alvarez" and the hospital writes "Maria Elena Alvarez" — and values you chose to release stay released for that case. A new task, **Connect the case**, builds one timeline across the documents with "Document k" citations and lists what does not add up (in the sample: the bill asks for the ambulance charge the insurer denied for missing paperwork). Try it with the "Case folder" sample button.
+- **Routing policy in Firebase Remote Config (Nov 14).** Which tasks prefer the device and which prefer the cloud, the cloud model and temperature, the length limit for Gemini Nano, and an emergency switch that keeps every request on the device (say, when the free cloud quota runs out) now come from Remote Config, with the shipped policy as in-app defaults. A "Routing policy" card shows what is in effect and where it came from, and each task is tagged *device* or *cloud* from the live policy. No value can weaken the privacy invariant: raw text still only reaches an `ONLY_ON_DEVICE` model, and with the cloud switched off Auto runs `ONLY_ON_DEVICE` on the masked text. Parameters: `cloud_preferred_tasks`, `cloud_model`, `cloud_temperature`, `device_char_budget`, `cloud_enabled`, `routing_notice` (see `src/config.ts`).
 - **Tests run in real Chrome.** reCAPTCHA Enterprise (App Check) rejects the bundled headless Chromium, so the end-to-end check now uses the installed Chrome. 19/19 checks pass on the public URL, including two new ones for Scan (reads on device; no request reaches Google while scanning, with or without Nano).
 
 ## Run it locally
@@ -94,6 +96,7 @@ To use Gemini Nano: desktop Chrome 139+, enable `chrome://flags/#prompt-api-for-
 - **Cloud path (no Nano):** shields the sample, calls Gemini, and checks that **no raw identifier appears in any request body sent to Google**.
 - **Device path:** stubs Chrome's Prompt API (`LanguageModel`) and checks that `PREFER_ON_DEVICE` requests report `inferenceSource === "on_device"` and that **zero requests reach Google**.
 - **Offline:** without Nano, runs are blocked with an explanation. With Nano, Private mode runs `ONLY_ON_DEVICE`.
+- **Remote Config:** with a stubbed template (cloud off, Summarize moved to the cloud side), the new policy applies without a rebuild, Cloud mode is blocked and Auto runs `ONLY_ON_DEVICE` with zero requests to the model endpoint.
 
 ## Limitations
 

@@ -14,8 +14,9 @@ import {
   type Source,
 } from './ai';
 import { addDoc, createCase, deleteCase, joinCase, loadCases, removeDoc, setReleased, type CaseFolder } from './cases';
-import { ASSISTANT_SYSTEM, buildPrompt, CASE_ONLY, route, TASKS, TRIAGE_SCHEMA, TRIAGE_SYSTEM, type Policy, type Task } from './router';
+import { ASSISTANT_SYSTEM, buildPrompt, CASE_ONLY, route, TASKS, weightOf, TRIAGE_SCHEMA, TRIAGE_SYSTEM, type Policy, type Task } from './router';
 import { CASE_DEMO, SAMPLES } from './samples';
+import { loadRouting, routing } from './config';
 import { renderLetterImage } from './letter';
 import { ACCEPTED_IMAGE, prepareImage, transcribe, type PreparedImage } from './scan';
 import { applyMask, buildEntities, bytes } from './shield/mask';
@@ -149,7 +150,7 @@ app.innerHTML = `
         <button type="button" role="radio" data-policy="cloud"><b>Cloud</b><span>Best quality. Masked text only</span></button>
       </div>
       <div class="tasks" id="tasks">
-        ${TASKS.map((t) => `<button type="button" class="task" data-task="${t.id}"><b>${esc(t.label)}</b><span>${esc(t.hint)}</span><em class="w-${t.weight}">${t.weight}</em></button>`).join('')}
+        ${TASKS.map((t) => `<button type="button" class="task" data-task="${t.id}"><b>${esc(t.label)}</b><span>${esc(t.hint)}</span><em class="w-${t.weight}">${t.weight === 'heavy' ? 'cloud' : 'device'}</em></button>`).join('')}
       </div>
       <input type="text" id="question" placeholder="e.g. Can I still take ibuprofen with these medicines?" hidden />
       <div class="route" id="route"></div>
@@ -172,6 +173,7 @@ app.innerHTML = `
       <ol class="ledger" id="ledger"></ol>
     </article>
     <article class="card" id="card-device"></article>
+    <article class="card" id="card-routing"></article>
   </aside>
 </main>
 
@@ -336,6 +338,12 @@ function renderAsk() {
   const multi = !!state.caseOpen;
   document.querySelectorAll<HTMLButtonElement>('[data-task]').forEach((b) => (b.hidden = !multi && CASE_ONLY.includes(b.dataset.task as Task['id'])));
   if (!multi && CASE_ONLY.includes(state.task.id)) state.task = TASKS[0];
+  document.querySelectorAll<HTMLButtonElement>('[data-task]').forEach((b) => {
+    const w = weightOf(TASKS.find((t) => t.id === b.dataset.task)!);
+    const em = b.querySelector('em')!;
+    em.className = `w-${w}`;
+    em.textContent = w === 'heavy' ? 'cloud' : 'device';
+  });
   questionEl.hidden = state.task.id !== 'ask';
   const r = currentRoute();
   const dest =
@@ -472,7 +480,29 @@ function renderCase() {
   el.classList.toggle('active', !!c);
 }
 
+function renderRouting() {
+  const c = routing;
+  const tasks = TASKS.filter((t) => !CASE_ONLY.includes(t.id) || state.caseOpen);
+  const from =
+    c.status === 'loading'
+      ? '<span class="spinner"></span> Loading from Firebase Remote Config…'
+      : c.source === 'remote'
+        ? `Live policy from <b>Firebase Remote Config</b>${c.fetchedAt ? ` · updated ${new Date(c.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}${c.status === 'offline' ? ' · offline, last saved copy' : ''}`
+        : `Built-in policy${c.status === 'error' || c.status === 'offline' ? ' (Remote Config not reachable)' : ' · no override published in Remote Config'}`;
+  $('#card-routing').innerHTML = `<header class="card-h compact"><div><h2>Routing policy</h2><p>${from}</p></div></header>
+    ${c.notice ? `<p class="notice">${esc(c.notice)}</p>` : ''}
+    <dl class="kv">
+      <dt>Cloud path</dt><dd>${c.cloudEnabled ? 'on' : '<b class="warn-t">paused: everything stays on this device</b>'}</dd>
+      <dt>Cloud model</dt><dd><code>${esc(c.cloudModel)}</code> · temp ${c.cloudTemperature}</dd>
+      <dt>Device-first</dt><dd>${tasks.filter((t) => weightOf(t) === 'light').map((t) => esc(t.label)).join(', ') || '—'}</dd>
+      <dt>Cloud-first</dt><dd>${tasks.filter((t) => weightOf(t) === 'heavy').map((t) => esc(t.label)).join(', ') || '—'}</dd>
+      <dt>Nano length limit</dt><dd>${c.deviceCharBudget.toLocaleString()} characters</dd>
+    </dl>
+    <p class="muted small">Changes reach every user without a new build. None of them can send raw text off the device: only <code>ONLY_ON_DEVICE</code> ever sees it.</p>`;
+}
+
 function renderAll() {
+  renderRouting();
   renderScan();
   renderStatus();
   renderReview();
@@ -869,6 +899,10 @@ window.addEventListener('offline', onNet);
 
 renderAll();
 void refreshDevice();
+void loadRouting(() => {
+  renderRouting();
+  renderAsk();
+});
 // Chrome may finish a background download while the page is open.
 setInterval(() => {
   if (state.device === 'downloadable' || state.device === 'downloading') void refreshDevice();
@@ -879,4 +913,4 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 }
 
 // Exposed for automated tests only (no user data is reachable through it beyond what is on screen).
-(window as unknown as { __veil: unknown }).__veil = { state, buildEntities };
+(window as unknown as { __veil: unknown }).__veil = { state, buildEntities, routing: () => routing };

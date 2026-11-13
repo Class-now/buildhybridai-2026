@@ -1,6 +1,7 @@
 import { Schema } from 'firebase/ai';
 import { InferenceMode, type DeviceState, type Mode } from './ai';
 import { DOC_MARK } from './cases';
+import { routing } from './config';
 
 export type Policy = 'auto' | 'private' | 'cloud';
 
@@ -94,7 +95,10 @@ export interface Route {
   blockedReason?: string;
 }
 
-const TOKEN_BUDGET_CHARS = 20000; // ~5k tokens of document, leaves room in Nano's 9,216-token window
+/** Light or heavy, as set by the routing policy in Remote Config (falls back to the shipped default). */
+export function weightOf(task: Task): Task['weight'] {
+  return routing.cloudPreferred.has(task.id) ? 'heavy' : 'light';
+}
 
 export function route(task: Task, policy: Policy, device: DeviceState, online: boolean, docChars: number): Route {
   const deviceReady = device === 'available';
@@ -108,6 +112,15 @@ export function route(task: Task, policy: Policy, device: DeviceState, online: b
     };
   }
   if (policy === 'cloud') {
+    if (!routing.cloudEnabled) {
+      return {
+        mode: InferenceMode.ONLY_IN_CLOUD,
+        raw: false,
+        why: 'Cloud mode is paused by the operator (Remote Config).',
+        expected: 'blocked',
+        blockedReason: 'The cloud path is switched off right now. Use Auto or Private to run on this device.',
+      };
+    }
     return {
       mode: InferenceMode.ONLY_IN_CLOUD,
       raw: false,
@@ -116,9 +129,21 @@ export function route(task: Task, policy: Policy, device: DeviceState, online: b
       blockedReason: online ? undefined : 'You are offline. Cloud mode needs a connection.',
     };
   }
+  if (!routing.cloudEnabled) {
+    // Operator switch (Remote Config): keep every request on the device. Still masked text,
+    // so nothing changes for the privacy invariant; only the cloud fallback is removed.
+    return {
+      mode: InferenceMode.ONLY_ON_DEVICE,
+      raw: false,
+      why: 'The cloud path is paused (Remote Config), so this runs on Gemini Nano only, with the masked text.',
+      expected: deviceReady ? 'device' : 'blocked',
+      blockedReason: deviceReady ? undefined : 'The cloud path is paused right now and this browser has no on-device model.',
+    };
+  }
   // Auto: light tasks prefer the device, heavy or very long ones prefer the cloud.
-  const tooLong = docChars > TOKEN_BUDGET_CHARS;
-  if (task.weight === 'light' && !tooLong) {
+  // Both the task split and the length budget come from Remote Config (see config.ts).
+  const tooLong = docChars > routing.deviceCharBudget;
+  if (weightOf(task) === 'light' && !tooLong) {
     const expected = deviceReady ? 'device' : online ? 'cloud' : 'blocked';
     return {
       mode: InferenceMode.PREFER_ON_DEVICE,

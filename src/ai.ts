@@ -8,6 +8,7 @@ import {
   type LanguageModelCreateOptions,
 } from 'firebase/ai';
 import { ai } from './firebase';
+import { routing } from './config';
 
 export { InferenceMode, InferenceSource };
 export type Mode = (typeof InferenceMode)[keyof typeof InferenceMode];
@@ -132,17 +133,17 @@ interface ModelOpts {
 const cache = new Map<string, GenerativeModel>();
 
 export function model(mode: Mode, opts: ModelOpts): GenerativeModel {
-  const key = JSON.stringify([mode, opts.system, !!opts.schema, opts.maxOutputTokens]);
+  const key = JSON.stringify([mode, opts.system, !!opts.schema, opts.maxOutputTokens, routing.cloudModel, routing.cloudTemperature]);
   const hit = cache.get(key);
   if (hit) return hit;
   const m = getGenerativeModel(ai, {
     mode,
     inCloudParams: {
-      // Default hybrid cloud model; listed explicitly so the README and the UI agree.
-      model: 'gemini-3.5-flash-lite',
+      // Cloud model and temperature come from Remote Config (default gemini-3.5-flash-lite).
+      model: routing.cloudModel,
       systemInstruction: opts.system,
       generationConfig: {
-        temperature: 0.3,
+        temperature: routing.cloudTemperature,
         maxOutputTokens: opts.maxOutputTokens ?? 1200,
         ...(opts.schema ? { responseMimeType: 'application/json', responseSchema: opts.schema } : {}),
       },

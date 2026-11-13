@@ -20,9 +20,9 @@ const check = (name, ok, detail = '') => {
 };
 
 // Real Chrome: reCAPTCHA Enterprise (App Check) rejects the bundled headless Chromium as a bot.
-const browser = await chromium.launch({ channel: process.env.E2E_CHANNEL ?? 'chrome', headless: true, args: ['--disable-blink-features=AutomationControlled'] });
+const browser = await chromium.launch({ ...(process.env.E2E_EXECUTABLE ? { executablePath: process.env.E2E_EXECUTABLE } : { channel: process.env.E2E_CHANNEL ?? 'chrome' }), headless: true, args: ['--disable-blink-features=AutomationControlled'] });
 
-async function newPage(stubNano) {
+async function newPage(stubNano, rcTemplate) {
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, deviceScaleFactor: 1, locale: 'en-US', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36' });
   // reCAPTCHA Enterprise may score an automated browser as a bot (App Check 403). With a debug token
   // registered in the Firebase console, the App Check SDK skips reCAPTCHA. Never commit the value.
@@ -66,11 +66,19 @@ async function newPage(stubNano) {
       window.__nanoStub = true;
     });
   }
+  if (rcTemplate) {
+    // Stand-in for a template published in the Firebase console (Remote Config REST fetch response).
+    await ctx.route(/firebaseremoteconfig\.googleapis\.com/, (r) =>
+      r.fulfill({ status: 200, contentType: 'application/json', headers: { etag: 'e2e', 'access-control-allow-origin': '*', 'access-control-expose-headers': 'etag' }, body: JSON.stringify({ entries: rcTemplate, state: 'UPDATE', templateVersion: '99' }) }),
+    );
+  }
   const page = await ctx.newPage();
   const cloudBodies = [];
   page.on('request', (r) => {
-    // Only model calls count; the App Check token exchange carries no document text.
-    if (r.url().includes('googleapis.com') && !r.url().includes('firebaseappcheck') && r.method() === 'POST') cloudBodies.push(r.postData() ?? '');
+    // Only model calls count. The App Check token exchange and the Remote Config fetch (with its
+    // Installations id) happen at page load and carry no document text.
+    const u = r.url();
+    if (u.includes('googleapis.com') && !/firebaseappcheck|firebaseremoteconfig|firebaseinstallations/.test(u) && r.method() === 'POST') cloudBodies.push(r.postData() ?? '');
   });
   page.on('pageerror', (e) => console.log('pageerror:', e.message));
   await page.goto(url, { waitUntil: 'networkidle' });
@@ -211,6 +219,38 @@ async function newPage(stubNano) {
   await page.reload({ waitUntil: 'networkidle' });
   const kept = await page.evaluate(() => window.__veil.state.cases.map((c) => c.docs.length));
   check('case folder persists in this browser after reload', kept[0] === 3, JSON.stringify(kept));
+  await ctx.close();
+}
+
+// ---------- 5. Routing policy from Remote Config ----------
+{
+  // Built-in defaults when nothing is published.
+  const { ctx, page } = await newPage(true);
+  await page.waitForFunction(() => window.__veil.routing().status !== 'loading', null, { timeout: 20000 });
+  const def = await page.evaluate(() => ({ ...window.__veil.routing(), cloudPreferred: [...window.__veil.routing().cloudPreferred] }));
+  const card = (await page.textContent('#card-routing')) ?? '';
+  check('routing card shows the policy in effect', /Routing policy/.test(card) && card.includes(def.cloudModel), `${def.source}/${def.status}: ${def.cloudPreferred.join(',')}`);
+  await ctx.close();
+}
+{
+  // An operator flips the cloud off and moves "Summarize" to the cloud side.
+  const { ctx, page, cloudBodies } = await newPage(true, { cloud_enabled: 'false', cloud_preferred_tasks: 'summary,explain', routing_notice: 'Cloud paused for maintenance' });
+  await page.waitForFunction(() => window.__veil.routing().status === 'fetched', null, { timeout: 20000 });
+  const rc = await page.evaluate(() => ({ ...window.__veil.routing(), cloudPreferred: [...window.__veil.routing().cloudPreferred] }));
+  check('Remote Config template is applied without a new build', rc.source === 'remote' && rc.cloudEnabled === false && rc.cloudPreferred.join(',') === 'summary,explain', JSON.stringify({ source: rc.source, cloud: rc.cloudEnabled, tasks: rc.cloudPreferred }));
+  await page.click('[data-sample="discharge"]');
+  await page.click('#btn-shield');
+  await page.waitForFunction(() => !window.__veil.state.shielding && window.__veil.state.shield, null, { timeout: 30000 });
+  await page.click('[data-policy="cloud"]');
+  const cloudBlocked = await page.$eval('#btn-run', (b) => b.disabled);
+  await page.click('[data-policy="auto"]');
+  await page.click('[data-task="summary"]');
+  await page.click('#btn-run');
+  await page.waitForFunction(() => { const a = window.__veil.state.answer; return a && !a.running; }, null, { timeout: 60000 });
+  const a = await page.evaluate(() => window.__veil.state.answer);
+  check('cloud switched off: Auto runs ONLY_ON_DEVICE, Cloud mode is blocked, nothing sent', cloudBlocked && a.mode === 'only_on_device' && a.source === 'on_device' && cloudBodies.length === 0, `${a.mode} → ${a.source}; cloud blocked: ${cloudBlocked}; ${cloudBodies.length} request(s)`);
+  await page.locator('#card-routing').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${out}/13-routing-remote-config.png`, fullPage: false });
   await ctx.close();
 }
 
