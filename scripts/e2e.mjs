@@ -174,6 +174,41 @@ async function newPage(stubNano) {
   await ctx.close();
 }
 
+// ---------- 3. Case folder (no Nano, real Gemini) ----------
+{
+  const { ctx, page, cloudBodies } = await newPage(false);
+  const hiddenSingle = await page.$eval('[data-task="connect"]', (b) => b.hidden);
+  check('"Connect the case" is hidden for a single document', hiddenSingle);
+  await page.click('#btn-case-sample');
+  await page.waitForSelector('#card-review:not([hidden])');
+  await page.waitForFunction(() => !window.__veil.state.shielding);
+  const st = await page.evaluate(() => ({ caseOpen: window.__veil.state.caseOpen, docs: window.__veil.state.cases[0]?.docs.length, ents: window.__veil.state.shield.entities }));
+  check('sample case folder saved with 3 documents and opened together', !!st.caseOpen && st.docs === 3, `${st.docs} docs`);
+  const alvarez = st.ents.filter((e) => /alvarez/i.test(e.value) && e.type === 'PERSON').map((e) => e.placeholder);
+  await page.click('[data-view="outbound"]');
+  const outbound = await page.textContent('#doc-view');
+  const caseRaw = [...RAW, 'SA-7719-0042', 'HSA-30219877', 'Maria E. Alvarez'];
+  const leaked = caseRaw.filter((r) => outbound.includes(r));
+  const p1 = st.ents.find((e) => e.value === 'Maria Elena Alvarez')?.placeholder;
+  const perDoc = outbound.split(/=== Document \d of 3/).slice(1).map((d) => (p1 ? d.includes(p1) : false));
+  check('one placeholder per person across all documents, no raw identifiers', leaked.length === 0 && perDoc.length === 3 && perDoc.every(Boolean), `leaked: ${leaked.join(', ') || 'none'}; ${p1} in docs ${perDoc.map((b, i) => (b ? i + 1 : '')).join('')}; Alvarez placeholders ${alvarez.join(' ')}`);
+  await page.screenshot({ path: `${out}/11-case-outbound.png`, fullPage: false });
+  const shown = await page.$eval('[data-task="connect"]', (b) => !b.hidden);
+  await page.click('[data-task="connect"]');
+  await page.click('#btn-run');
+  await page.waitForFunction(() => { const a = window.__veil.state.answer; return a && !a.running; }, null, { timeout: 120000 });
+  const ans = await page.evaluate(() => window.__veil.state.answer);
+  check('"Connect the case" ran in the cloud with masked text', shown && ans.source === 'in_cloud' && !ans.error && /Document [123]/.test(ans.text), ans.error ?? `${ans.text.length} chars`);
+  const leakedNet = caseRaw.filter((r) => cloudBodies.join('\n').includes(r));
+  check('no raw identifiers from any case document reached Google', cloudBodies.length > 0 && leakedNet.length === 0, `${cloudBodies.length} request(s); leaked: ${leakedNet.join(', ') || 'none'}`);
+  await page.locator('#card-answer').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${out}/12-case-connect.png`, fullPage: false });
+  await page.reload({ waitUntil: 'networkidle' });
+  const kept = await page.evaluate(() => window.__veil.state.cases.map((c) => c.docs.length));
+  check('case folder persists in this browser after reload', kept[0] === 3, JSON.stringify(kept));
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);

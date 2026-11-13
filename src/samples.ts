@@ -75,3 +75,44 @@ Send appeals to: Appeals Unit, PO Box 30417, Salt Lake City, UT 84130, fax (801)
 Questions: Member Services 1-800-555-0123. Card on file for premium autopay: 4111 1111 1111 1111.`,
   },
 ];
+
+/** Two follow-up letters about the discharge sample, for the "Try a case folder" demo. */
+export const CASE_DEMO: Sample[] = [
+  {
+    id: 'case-bill',
+    label: 'Hospital bill',
+    text: `St. Agnes Regional Medical Center — Patient Billing
+Statement date: 11/12/2026
+
+Patient: Maria Elena Alvarez
+Guarantor: Daniel Alvarez, 41 Maple Terrace, Apt 3B, Somerville
+Account: SA-7719-0042  MRN: 00483921-7
+
+Inpatient stay 10/28 – 11/03 (6 days)
+  Room and board, telemetry unit ........ $14,820.00
+  Pharmacy (IV furosemide, ceftriaxone) .. $2,315.40
+  Echocardiogram, transthoracic ......... $1,960.00
+  Ambulance transport, 10/28 ............ $1,240.00
+Total charges ........................... $20,335.40
+Insurance payments (Harbor Senior Advantage) -$17,094.40
+Patient balance due by 12/05/2026 ....... $3,241.00
+
+Questions about this bill: Patient Financial Services, (617) 555-0186. Ask about financial assistance before the due date.`,
+  },
+  {
+    id: 'case-eob',
+    label: 'Insurer letter',
+    text: `Harbor Senior Advantage (HMO)
+Explanation of Benefits — this is not a bill
+
+Member: Maria E. Alvarez   Member ID: HSA-30219877
+Claim: inpatient admission 10/28/2026 – 11/03/2026, St. Agnes Regional Medical Center
+
+Covered: room and board, pharmacy, echocardiogram. Plan paid $17,094.40.
+Not covered: ambulance transport 10/28 ($1,240.00) — denied, no medical necessity documentation received from the transport provider.
+Your cost share for the admission: $2,001.00 (inpatient copay).
+
+If you disagree, you may appeal within 60 days of this notice (dated 11/08/2026). Send the appeal and any records to Harbor Appeals, PO Box 7720, Hartford, CT 06102.
+Member Services: 1-800-555-0164.`,
+  },
+];

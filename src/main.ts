@@ -13,8 +13,9 @@ import {
   type Mode,
   type Source,
 } from './ai';
-import { ASSISTANT_SYSTEM, buildPrompt, route, TASKS, TRIAGE_SCHEMA, TRIAGE_SYSTEM, type Policy, type Task } from './router';
-import { SAMPLES } from './samples';
+import { addDoc, createCase, deleteCase, joinCase, loadCases, removeDoc, setReleased, type CaseFolder } from './cases';
+import { ASSISTANT_SYSTEM, buildPrompt, CASE_ONLY, route, TASKS, TRIAGE_SCHEMA, TRIAGE_SYSTEM, type Policy, type Task } from './router';
+import { CASE_DEMO, SAMPLES } from './samples';
 import { renderLetterImage } from './letter';
 import { ACCEPTED_IMAGE, prepareImage, transcribe, type PreparedImage } from './scan';
 import { applyMask, buildEntities, bytes } from './shield/mask';
@@ -77,6 +78,11 @@ const state = {
   answer: null as Answer | null,
   showSeen: false,
   ledger: [] as LedgerEntry[],
+  cases: loadCases() as CaseFolder[],
+  caseId: '' as string,
+  /** Id of the case whose documents are open together in the editor. */
+  caseOpen: '' as string,
+  naming: false,
   scan: null as null | { previewUrl: string; text: string; part: number; parts: number; running: boolean; error?: string; ms?: number },
 };
 
@@ -107,6 +113,7 @@ app.innerHTML = `
       <div class="samples" role="group" aria-label="Sample documents">
         <span>Try a sample:</span>
         ${SAMPLES.map((s) => `<button type="button" class="chip" data-sample="${s.id}">${esc(s.label)}</button>`).join('')}
+        <button type="button" class="chip" id="btn-case-sample">Case folder: discharge + bill + insurer</button>
       </div>
       <div class="scan-row">
         <label class="btn" id="btn-scan">Scan a paper letter<input type="file" id="scan-file" accept="image/*" capture="environment" hidden /></label>
@@ -114,6 +121,7 @@ app.innerHTML = `
         <span class="muted small">Photos are read by Gemini Nano on this device. Image bytes never go to the cloud.</span>
       </div>
       <div id="scan" hidden></div>
+      <div class="case" id="case" aria-label="Case folder"></div>
       <textarea id="doc" spellcheck="false" placeholder="Paste the text of a document here…"></textarea>
       <div class="card-f">
         <span class="muted" id="doc-meta">0 characters</span>
@@ -325,6 +333,9 @@ function currentRoute() {
 function renderAsk() {
   document.querySelectorAll<HTMLButtonElement>('[data-policy]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.policy === state.policy)));
   document.querySelectorAll<HTMLButtonElement>('[data-task]').forEach((b) => b.classList.toggle('active', b.dataset.task === state.task.id));
+  const multi = !!state.caseOpen;
+  document.querySelectorAll<HTMLButtonElement>('[data-task]').forEach((b) => (b.hidden = !multi && CASE_ONLY.includes(b.dataset.task as Task['id'])));
+  if (!multi && CASE_ONLY.includes(state.task.id)) state.task = TASKS[0];
   questionEl.hidden = state.task.id !== 'ask';
   const r = currentRoute();
   const dest =
@@ -426,6 +437,41 @@ function renderScan() {
     <p class="muted small"><code>ONLY_ON_DEVICE</code> · the image model has no cloud fallback.</p></div>`;
 }
 
+function currentCase(): CaseFolder | undefined {
+  return state.cases.find((c) => c.id === state.caseId);
+}
+
+function renderCase() {
+  const el = $('#case');
+  const c = currentCase();
+  const options = state.cases.map((x) => `<option value="${esc(x.id)}" ${x.id === state.caseId ? 'selected' : ''}>${esc(x.name)} (${x.docs.length})</option>`).join('');
+  const head = state.naming
+    ? `<input type="text" id="case-name" placeholder="Name the case, e.g. Dad’s hospital stay" maxlength="40" />
+       <button type="button" class="btn small" id="case-create">Create</button>
+       <button type="button" class="btn small ghost" id="case-cancel">Cancel</button>`
+    : `<label for="case-select">Case folder</label>
+       <select id="case-select"><option value="">None</option>${options}<option value="__new">+ New case…</option></select>`;
+  const inCase = c?.docs.some((d) => d.text.trim() === state.doc.trim());
+  const body = c
+    ? `<div class="case-docs">${
+        c.docs.length
+          ? c.docs
+              .map(
+                (d, i) => `<span class="case-doc"><button type="button" class="chip" data-open-doc="${esc(d.id)}" title="Open this document alone">${i + 1}. ${esc(d.title)}</button><button type="button" class="x" data-remove-doc="${esc(d.id)}" aria-label="Remove ${esc(d.title)} from the case">×</button></span>`,
+              )
+              .join('')
+          : '<span class="muted small">Empty. Paste, pick or scan a document, then save it here.</span>'
+      }</div>
+      <div class="case-actions">
+        <button type="button" class="btn small" id="case-save" ${!state.doc.trim() || inCase || state.caseOpen ? 'disabled' : ''}>${inCase ? 'Saved in this case' : 'Save this document to the case'}</button>
+        <button type="button" class="btn small primary" id="case-open" ${c.docs.length < 2 ? 'disabled' : ''}>Open the whole case${c.docs.length ? ` (${c.docs.length})` : ''}</button>
+        <button type="button" class="btn small ghost" id="case-delete">Delete case</button>
+      </div>`
+    : '';
+  el.innerHTML = `<div class="case-h">${head}<span class="muted small">Kept in this browser only. Opening a whole case masks every document together — one placeholder per person across all of them.</span></div>${body}`;
+  el.classList.toggle('active', !!c);
+}
+
 function renderAll() {
   renderScan();
   renderStatus();
@@ -433,7 +479,8 @@ function renderAll() {
   renderAsk();
   renderAnswer();
   renderLedger();
-  $('#doc-meta').textContent = `${state.doc.length.toLocaleString()} characters`;
+  renderCase();
+  $('#doc-meta').textContent = `${state.doc.length.toLocaleString()} characters${state.caseOpen ? ` · whole case “${state.cases.find((c) => c.id === state.caseOpen)?.name ?? ''}”` : ''}`;
   $<HTMLButtonElement>('#btn-shield').disabled = state.shielding || !state.doc.trim();
   $<HTMLButtonElement>('#btn-shield').textContent = state.shielding ? 'Shielding on device…' : state.shield ? 'Re-scan' : 'Shield it on my device';
 }
@@ -472,7 +519,9 @@ async function onShield() {
   renderAll();
   const useNano = state.device === 'available';
   const t0 = performance.now();
-  let res = await runShield(state.doc, false, state.shield?.entities);
+  const c = state.caseOpen ? state.cases.find((x) => x.id === state.caseOpen) : undefined;
+  const previous = state.shield?.entities ?? (c ? c.released.map((key) => ({ key, masked: false }) as Entity) : []);
+  let res = await runShield(state.doc, false, previous);
   if (useNano) {
     // Show the instant rule-based result while Nano reads; sending stays locked until it finishes.
     state.shield = res;
@@ -587,7 +636,8 @@ function fallbackNote(mode: Mode, source: Source): string | undefined {
   return undefined;
 }
 
-function resetDoc(text: string) {
+function resetDoc(text: string, caseOpen = '') {
+  state.caseOpen = caseOpen;
   docEl.value = text;
   state.doc = text;
   state.shield = null;
@@ -648,6 +698,7 @@ function toggleEntity(key: string) {
   const e = sh.entities.find((x) => x.key === key);
   if (!e) return;
   e.masked = !e.masked;
+  if (state.caseOpen) setReleased(state.caseOpen, sh.entities.filter((x) => !x.masked).map((x) => x.key));
   renderReview();
   renderAsk();
 }
@@ -658,6 +709,7 @@ function toggleEntity(key: string) {
 
 docEl.addEventListener('input', () => {
   state.doc = docEl.value;
+  if (state.caseOpen && !state.doc.trim()) state.caseOpen = '';
   if (state.shield && state.shield.original !== state.doc) {
     state.shield = null;
     state.triage = null;
@@ -691,6 +743,78 @@ $('#btn-scan-sample').addEventListener('click', async () => {
   void onScan(await renderLetterImage(s.text));
 });
 $('#btn-shield').addEventListener('click', () => void onShield());
+
+$('#btn-case-sample').addEventListener('click', () => {
+  const name = 'Mom’s hospital stay (sample)';
+  let c = loadCases().find((x) => x.name === name);
+  if (!c) {
+    c = createCase(name);
+    for (const s of [SAMPLES.find((x) => x.id === 'discharge')!, ...CASE_DEMO]) addDoc(c.id, s.text);
+  }
+  refreshCases(c.id);
+  const fresh = currentCase()!;
+  resetDoc(joinCase(fresh), fresh.id);
+  renderAll();
+  void onShield();
+});
+
+function refreshCases(selectId = state.caseId) {
+  state.cases = loadCases();
+  state.caseId = state.cases.some((c) => c.id === selectId) ? selectId : '';
+}
+$('#case').addEventListener('change', (ev) => {
+  const t = ev.target as HTMLSelectElement;
+  if (t.id !== 'case-select') return;
+  if (t.value === '__new') state.naming = true;
+  else state.caseId = t.value;
+  renderAll();
+  if (state.naming) $<HTMLInputElement>('#case-name').focus();
+});
+function finishNaming(create: boolean) {
+  const name = (document.querySelector<HTMLInputElement>('#case-name')?.value ?? '').trim();
+  state.naming = false;
+  if (create) {
+    const c = createCase(name);
+    if (state.doc.trim() && !state.caseOpen) addDoc(c.id, state.doc);
+    refreshCases(c.id);
+  }
+  renderAll();
+}
+$('#case').addEventListener('keydown', (ev) => {
+  if ((ev.target as HTMLElement).id !== 'case-name') return;
+  if (ev.key === 'Enter') finishNaming(true);
+  if (ev.key === 'Escape') finishNaming(false);
+});
+$('#case').addEventListener('click', (ev) => {
+  const t = (ev.target as HTMLElement).closest<HTMLElement>('button');
+  if (!t) return;
+  const c = currentCase();
+  if (t.id === 'case-create') finishNaming(true);
+  else if (t.id === 'case-cancel') finishNaming(false);
+  else if (!c) return;
+  else if (t.id === 'case-save') {
+    addDoc(c.id, state.doc);
+    refreshCases();
+    renderAll();
+  } else if (t.id === 'case-open') {
+    resetDoc(joinCase(c), c.id);
+    renderAll();
+    void onShield();
+  } else if (t.id === 'case-delete') {
+    deleteCase(c.id);
+    if (state.caseOpen === c.id) state.caseOpen = '';
+    refreshCases('');
+    renderAll();
+  } else if (t.dataset.openDoc) {
+    const d = c.docs.find((x) => x.id === t.dataset.openDoc);
+    if (d) resetDoc(d.text);
+    renderAll();
+  } else if (t.dataset.removeDoc) {
+    removeDoc(c.id, t.dataset.removeDoc);
+    refreshCases();
+    renderAll();
+  }
+});
 $('#btn-run').addEventListener('click', () => void onRun());
 $('#btn-stop').addEventListener('click', () => abort?.abort());
 $('#pill-device').addEventListener('click', () => document.querySelector('#card-device')?.scrollIntoView({ behavior: 'smooth' }));

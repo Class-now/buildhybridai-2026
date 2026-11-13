@@ -1,9 +1,10 @@
 import { Schema } from 'firebase/ai';
 import { InferenceMode, type DeviceState, type Mode } from './ai';
+import { DOC_MARK } from './cases';
 
 export type Policy = 'auto' | 'private' | 'cloud';
 
-export type TaskId = 'summary' | 'actions' | 'explain' | 'reply' | 'ask';
+export type TaskId = 'summary' | 'actions' | 'explain' | 'reply' | 'ask' | 'connect';
 
 export interface Task {
   id: TaskId;
@@ -53,7 +54,18 @@ export const TASKS: Task[] = [
     weight: 'light',
     instruction: (q) => `Answer the reader's question about this document. Question: ${q ?? ''}`,
   },
+  {
+    id: 'connect',
+    label: 'Connect the case',
+    hint: 'One timeline across documents',
+    weight: 'heavy',
+    instruction: () =>
+      'Build one timeline of events, amounts and deadlines across all the documents, oldest first ("- **date** — event (Document k)"). Then list, under "Does not add up", every place where the documents disagree or something expected is missing (for example a charge the insurer did not mention, or a follow-up with no appointment). End with the single next step that matters most.',
+  },
 ];
+
+/** Tasks that only make sense when several documents are open together. */
+export const CASE_ONLY: TaskId[] = ['connect'];
 
 export const ASSISTANT_SYSTEM = `You help a person understand an official document they received (medical, legal, housing, financial, or government).
 Personal identifiers may have been replaced by placeholders such as [PERSON_1], [ORG_1], [ID_2]. When you refer to them, copy the placeholder exactly; never guess or invent the real values.
@@ -133,5 +145,11 @@ export function route(task: Task, policy: Policy, device: DeviceState, online: b
 }
 
 export function buildPrompt(task: Task, doc: string, question?: string): string {
-  return `${task.instruction(question)}\n\n--- DOCUMENT ---\n${doc}\n--- END OF DOCUMENT ---`;
+  const m = doc.match(DOC_MARK);
+  const caseNote = m
+    ? `
+
+The text below is a case folder of ${m[2]} related documents about the same matter, each starting with a "=== Document k of ${m[2]}: ... ===" header. The same placeholder means the same person or thing in every document. Use all of them and say which document a fact comes from (e.g. "Document 2").`
+    : '';
+  return `${task.instruction(question)}${caseNote}\n\n--- DOCUMENT ---\n${doc}\n--- END OF DOCUMENT ---`;
 }

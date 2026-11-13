@@ -43,6 +43,8 @@ export interface Entity {
   detector: Detector;
   masked: boolean; // user can un-mask
   count: number;
+  /** Other spellings of the same value (e.g. "Maria E. Alvarez" for "Maria Elena Alvarez"). */
+  aliases?: string[];
 }
 
 export interface ShieldResult {

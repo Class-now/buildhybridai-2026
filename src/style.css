@@ -255,3 +255,16 @@ textarea:focus { outline: 2px solid var(--device); border-color: transparent; }
 .scan img { width: 120px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.18); flex: none; }
 .scan pre { white-space: pre-wrap; font-size: 0.8rem; max-height: 9em; overflow: hidden; margin: 6px 0 0; }
 .scan p { margin: 6px 0 0; }
+
+/* Case folder */
+.case { border: 1px dashed var(--line-2); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 0.86rem; }
+.case.active { border-style: solid; border-color: #a7ddd4; background: var(--device-bg); }
+.case-h { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.case-h label { font-weight: 600; }
+.case-h select, .case-h input { border: 1px solid var(--line-2); border-radius: 8px; padding: 5px 8px; font: inherit; background: #fff; }
+.case-h input { min-width: 16em; }
+.case-docs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 8px; }
+.case-doc { display: inline-flex; align-items: center; }
+.case-doc .chip { max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.case-doc .x { border: 0; background: none; color: var(--ink-2); font-size: 1rem; padding: 0 6px; cursor: pointer; }
+.case-actions { display: flex; flex-wrap: wrap; gap: 8px; }

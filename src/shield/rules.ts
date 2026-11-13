@@ -29,7 +29,7 @@ function luhn(num: string): boolean {
   return sum % 10 === 0;
 }
 
-const NAME = "[A-Z][a-zA-Z'\\-]+(?:[ ]+(?:[A-Z]\\.|[A-Z][a-zA-Z'\\-]+)){0,3}";
+const NAME = "[A-Z][a-zA-Z'\\-]+(?:[ ](?:[A-Z]\\.|[A-Z][a-zA-Z'\\-]+)){0,3}";
 
 const RULES: Rule[] = [
   { type: 'EMAIL', re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g },
@@ -82,6 +82,9 @@ const RULES: Rule[] = [
   },
 ];
 
+// Words that make a capitalized phrase a department or heading, not a person ("Patient Financial Services", "Patient Billing").
+const NOT_NAME_WORDS = new Set(['Billing', 'Financial', 'Services', 'Service', 'Account', 'Accounts', 'Portal', 'Support', 'Relations', 'Center', 'Department', 'Office', 'Unit', 'Statement', 'ID', 'Number']);
+
 const NOT_NAMES = new Set([
   'The', 'This', 'That', 'Your', 'You', 'We', 'Our', 'Please', 'Thank', 'Thanks', 'Sir', 'Madam', 'Customer',
   'Patient', 'Tenant', 'Team', 'Department', 'Office', 'Member', 'Policyholder', 'Doctor', 'All', 'Dr', 'Mr', 'Mrs', 'Ms', 'Mx', 'Prof', 'Tenant', 'Services', 'Unit',
@@ -98,7 +101,7 @@ export function detectWithRules(text: string): Span[] {
       value = value.replace(/[.,;:]+$/, '').trim();
       if (!value) continue;
       if (rule.validate && !rule.validate(value)) continue;
-      if (rule.type === 'PERSON' && NOT_NAMES.has(value.split(/\s+/)[0])) continue;
+      if (rule.type === 'PERSON' && (NOT_NAMES.has(value.split(/\s+/)[0]) || value.split(/\s+/).some((w) => NOT_NAME_WORDS.has(w)))) continue;
       const offsetInMatch = g === 0 ? 0 : m[0].indexOf(m[g]);
       const start = (m.index ?? 0) + offsetInMatch;
       spans.push({ start, end: start + value.length, text: value, type: rule.type, detector: 'rules' });

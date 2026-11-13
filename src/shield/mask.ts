@@ -69,7 +69,16 @@ export function buildEntities(spans: Span[], previous: Entity[] = []): Entity[] 
   // Surname-only mentions share the full name's placeholder.
   const personFull = spans.filter((s) => s.type === 'PERSON' && /\s/.test(s.text.trim()));
   const aliasOf = (s: Span): string => {
-    if (s.type !== 'PERSON' || /\s/.test(s.text.trim())) return norm(s.text);
+    if (s.type === 'PERSON' && /\s/.test(s.text.trim())) {
+      // "Maria E. Alvarez" and "Maria Elena Alvarez" are one person (same first and last name, compatible middle).
+      const same = [...byKey.values()].find((e) => e.type === 'PERSON' && e.key !== norm(s.text) && samePerson(e.value, s.text));
+      if (same) {
+        same.aliases = [...new Set([...(same.aliases ?? []), norm(s.text)])];
+        return same.key;
+      }
+      return norm(s.text);
+    }
+    if (s.type !== 'PERSON') return norm(s.text);
     const hit = personFull.find((p) => p.text.split(/\s+/).some((w) => norm(w) === norm(s.text)));
     return hit ? norm(hit.text) : norm(s.text);
   };
@@ -99,10 +108,25 @@ export function buildEntities(spans: Span[], previous: Entity[] = []): Entity[] 
   return [...byKey.values()].sort((a, b) => a.type.localeCompare(b.type) || a.placeholder.localeCompare(b.placeholder, undefined, { numeric: true }));
 }
 
+const nameWords = (s: string) => s.split(/\s+/).map((w) => norm(w).replace(/\.$/, '')).filter(Boolean);
+
+/** Same first and last name, and every middle name matches or is its initial. */
+export function samePerson(a: string, b: string): boolean {
+  const x = nameWords(a);
+  const y = nameWords(b);
+  if (x.length < 2 || y.length < 2 || x[0] !== y[0] || x[x.length - 1] !== y[y.length - 1]) return false;
+  const mx = x.slice(1, -1);
+  const my = y.slice(1, -1);
+  if (!mx.length || !my.length) return true;
+  if (mx.length !== my.length) return false;
+  return mx.every((w, i) => w === my[i] || (w.length === 1 && my[i].startsWith(w)) || (my[i].length === 1 && w.startsWith(my[i])));
+}
+
 export function entityForSpan(span: Span, entities: Entity[]): Entity | undefined {
   const k = norm(span.text);
   return (
     entities.find((e) => e.key === k) ??
+    entities.find((e) => e.aliases?.includes(k)) ??
     entities.find((e) => e.type === 'PERSON' && e.value.split(/\s+/).some((w) => norm(w) === k))
   );
 }
