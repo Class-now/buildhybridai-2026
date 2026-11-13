@@ -24,6 +24,11 @@ const browser = await chromium.launch({ channel: process.env.E2E_CHANNEL ?? 'chr
 
 async function newPage(stubNano) {
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, deviceScaleFactor: 1, locale: 'en-US', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36' });
+  // reCAPTCHA Enterprise may score an automated browser as a bot (App Check 403). With a debug token
+  // registered in the Firebase console, the App Check SDK skips reCAPTCHA. Never commit the value.
+  if (process.env.VEIL_APPCHECK_DEBUG_TOKEN) {
+    await ctx.addInitScript((t) => { self.FIREBASE_APPCHECK_DEBUG_TOKEN = t; }, process.env.VEIL_APPCHECK_DEBUG_TOKEN);
+  }
   if (stubNano) {
     await ctx.addInitScript(() => {
       // Minimal stand-in for Chrome's built-in Prompt API, for testing routing only.
