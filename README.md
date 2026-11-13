@@ -62,6 +62,13 @@ Implementation notes:
 
 Code map: `src/ai.ts` (capability check, model factory, streaming, errors) · `src/router.ts` (tasks and the routing policy) · `src/shield/` (rules, Nano detector, masking and restore) · `src/main.ts` (UI).
 
+## Built during the submission period (from Nov 11, 2026 PT)
+
+Veil's first version (shield, mask, hybrid routing, privacy receipt) went live on Nov 10. Work done in the submission period:
+
+- **Scan a paper letter (Nov 13).** Take or upload a photo of a letter; Gemini Nano's image input reads it on the device and fills the document box. The image model is created with `ONLY_ON_DEVICE` and no cloud parameters, so a photo can never fall back to the cloud: on a device without image input Veil says so and sends nothing. Tall pages are cut into overlapping bands to keep small print legible, and the band texts are joined without duplicated lines. "Try a scanned letter" renders a sample letter as a photo in the browser so the feature can be tried without a camera.
+- **Tests run in real Chrome.** reCAPTCHA Enterprise (App Check) rejects the bundled headless Chromium, so the end-to-end check now uses the installed Chrome. 19/19 checks pass on the public URL, including two new ones for Scan (reads on device; no request reaches Google while scanning, with or without Nano).
+
 ## Run it locally
 
 ```bash

@@ -19,10 +19,11 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
 };
 
-const browser = await chromium.launch({ headless: true });
+// Real Chrome: reCAPTCHA Enterprise (App Check) rejects the bundled headless Chromium as a bot.
+const browser = await chromium.launch({ channel: process.env.E2E_CHANNEL ?? 'chrome', headless: true, args: ['--disable-blink-features=AutomationControlled'] });
 
 async function newPage(stubNano) {
-  const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, deviceScaleFactor: 1 });
+  const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, deviceScaleFactor: 1, locale: 'en-US', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36' });
   if (stubNano) {
     await ctx.addInitScript(() => {
       // Minimal stand-in for Chrome's built-in Prompt API, for testing routing only.
